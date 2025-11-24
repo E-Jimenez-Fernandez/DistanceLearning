@@ -1,0 +1,18 @@
+Package: DistanceLearning
+Title: DL2 Composite Indicators with Machine Learning Weights
+Version: 0.0.0.9000
+Authors@R: person("Eduardo", "Jiménez-Fernández",
+                  role = c("aut", "cre"),
+                  email = "edjimfer@ugr.es")
+Description: Tools to compute DL2 composite indicators with machine learning based weighting schemes (Random Forest, MARS, neural networks) and robustness analysis.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    randomForest,
+    earth,
+    nnet
+Suggests:
+    testthat

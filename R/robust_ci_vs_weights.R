@@ -1,0 +1,142 @@
+#' Robustness analysis of DL2 composite indicators under weight perturbations
+#'
+#' Performs a Monte Carlo robustness analysis of a DL2 composite indicator by
+#' introducing random perturbations in the final weight vector and evaluating
+#' the stability of the resulting composite scores. The function quantifies
+#' robustness through rank correlations (Spearman and Kendall) and L1 distances
+#' between the perturbed and baseline weight vectors. Optionally, it also
+#' generates a graphical representation of the evolution of rank correlations
+#' across perturbations.
+#'
+#' @param Z A numeric matrix or data frame of indicators where rows represent
+#'   units and columns represent individual indicators.
+#' @param res A list returned by \code{ci_ml_fixedpoint()}, containing at least
+#'   \code{ci_final} (final composite indicator) and \code{w_final} (final weight
+#'   vector).
+#' @param B Integer specifying the number of Monte Carlo perturbations
+#'   (iterations). Defaults to \code{200}.
+#' @param noise_sd Standard deviation of the Gaussian noise added to the weights
+#'   in each perturbation step. Defaults to \code{0.05}.
+#' @param p Numeric value specifying the order of the norm used to recompute
+#'   perturbed composite indicators. Defaults to \code{2}.
+#' @param seed Optional integer seed for reproducibility. Defaults to \code{NULL}.
+#' @param plot Logical; if \code{TRUE}, generates a plot showing the evolution of
+#'   Spearman and Kendall rank correlations across perturbations. Defaults to
+#'   \code{TRUE}.
+#'
+#' @return A list containing:
+#' \itemize{
+#'   \item \code{rho_spearman}: Vector of Spearman correlations between the
+#'     baseline CI and each perturbed CI.
+#'   \item \code{rho_kendall}: Vector of Kendall correlations.
+#'   \item \code{L1_w}: L1 distances between original and perturbed weight vectors.
+#'   \item \code{summary_spearman}: Summary statistics for Spearman correlations.
+#'   \item \code{summary_kendall}: Summary statistics for Kendall correlations.
+#'   \item \code{summary_L1_w}: Summary statistics for L1 weight deviations.
+#' }
+#'
+#' @details
+#' The function evaluates robustness with respect to perturbations of the final
+#' weight vector \eqn{w^\*} obtained from the DL2 fixed-point algorithm. At each
+#' Monte Carlo iteration:
+#'
+#' \enumerate{
+#'   \item Random noise \eqn{\varepsilon_j \sim N(0, \sigma^2)} is added to each
+#'         weight, generating a perturbed vector.
+#'   \item Negative values are truncated to zero.
+#'   \item The perturbed weights are normalized to sum to one.
+#'   \item A new composite indicator is computed using the weighted \eqn{p}-norm.
+#'   \item Rank correlations between baseline and perturbed CI vectors are stored.
+#' }
+#'
+#' Spearman and Kendall correlations assess the robustness of unit rankings under
+#' perturbations, while the L1 norm measures the magnitude of deviation in the
+#' weight vector:
+#'
+#' \deqn{
+#'   \| w^\* - \tilde{w} \|_1 = \sum_j | w^\*_j - \tilde{w}_j |.
+#' }
+#'
+#' High correlations and small L1 deviations indicate a stable composite
+#' indicator insensitive to moderate variations in learned weights.
+#'
+#' @examples
+#' \dontrun{
+#' set.seed(123)
+#' Z <- matrix(runif(100), nrow = 20)
+#' res <- ci_ml_fixedpoint(Z, weight_method = "rf", verbose = FALSE)
+#' rob <- robust_ci_vs_weights(Z, res, B = 100, noise_sd = 0.03)
+#' rob$summary_spearman
+#' }
+#'
+#' @export
+robust_ci_vs_weights <- function(
+    Z,
+    res,
+    B        = 200,
+    noise_sd = 0.05,
+    p        = 2,
+    seed     = NULL,
+    plot     = TRUE
+) {
+
+  if (!is.null(seed)) set.seed(seed)
+
+  Z <- as.matrix(Z)
+  ci_base <- res$ci_final
+  w_base  <- res$w_final
+
+  n <- nrow(Z)
+  m <- length(w_base)
+
+  rho_spearman <- numeric(B)
+  rho_kendall  <- numeric(B)
+  L1_w         <- numeric(B)
+
+  for (b in seq_len(B)) {
+
+    w_pert <- w_base + rnorm(m, mean = 0, sd = noise_sd)
+    w_pert[w_pert < 0] <- 0
+    w_pert <- w_pert / sum(w_pert)
+
+    ci_pert <- ml_weighted_norm(Z, weights = w_pert, p = p)
+
+    rho_spearman[b] <- cor(ci_base, ci_pert, method = "spearman")
+    rho_kendall[b]  <- cor(ci_base, ci_pert, method = "kendall")
+    L1_w[b]         <- sum(abs(w_pert - w_base))
+  }
+
+  # --- Plot: Spearman & Kendall correlations with distinct colours
+  if (plot) {
+    it <- seq_len(B)
+    y_lim <- range(c(rho_spearman, rho_kendall), na.rm = TRUE)
+
+    plot(it, rho_spearman,
+         type = "p",
+         pch  = 16,
+         col  = "blue",
+         ylim = y_lim,
+         xlab = "Iteration",
+         ylab = "Rank correlations")
+
+    points(it, rho_kendall,
+           pch = 17,
+           col = "red")
+
+    legend("bottomright",
+           legend = c("Spearman", "Kendall"),
+           col    = c("blue", "red"),
+           pch    = c(16, 17),
+           lty    = c(1, 2),
+           bty    = "n")
+  }
+
+  list(
+    rho_spearman      = rho_spearman,
+    rho_kendall       = rho_kendall,
+    L1_w              = L1_w,
+    summary_spearman  = summary(rho_spearman),
+    summary_kendall   = summary(rho_kendall),
+    summary_L1_w      = summary(L1_w)
+  )
+}

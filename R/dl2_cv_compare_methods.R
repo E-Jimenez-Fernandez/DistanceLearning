@@ -1,0 +1,141 @@
+#' Cross-method resampling validation for DL2 weighting approaches
+#' Performs a cross-validation comparison of several DL2 weighting methods
+#' (\code{"rf"}, \code{"mars"}, \code{"nn"}) using repeated resampling.
+#' For each method, the function computes the DL2 composite indicator on multiple
+#' bootstrap samples and evaluates robustness through rank correlations and
+#' weight perturbation metrics. This procedure enables a systematic comparison
+#' of weighting approaches and assists in selecting the most stable and reliable
+#' method for constructing a DL2 composite indicator.
+#'
+#' @param Z A numeric matrix or data frame of indicators. Rows correspond to
+#'   statistical units and columns correspond to individual indicators.
+#' @param methods Character vector specifying the weighting methods to compare.
+#'   Must be a subset of \code{c("rf", "mars", "nn")}. Defaults to all three.
+#' @param B Integer giving the number of bootstrap replications for each method.
+#'   Defaults to \code{100}.
+#' @param prop Proportion of units included in each bootstrap resample. Defaults
+#'   to \code{0.8}.
+#' @param p Order of the norm used in the DL2 composite indicator. Defaults to
+#'   \code{2}.
+#' @param ntree Number of trees passed to the random forest method
+#'   (if used). Defaults to \code{500}.
+#' @param max_iter Maximum number of iterations for the DL2 fixed-point
+#'   algorithm. Defaults to \code{50}.
+#' @param lambda Damping parameter for the weight-update step in the fixed-point
+#'   algorithm. Must lie between zero and one. Defaults to \code{0.2}.
+#' @param n_stable Number of consecutive iterations falling below the tolerance
+#'   required to declare convergence. Defaults to \code{3}.
+#' @param seed Optional integer seed for reproducibility. Defaults to
+#'   \code{NULL}.
+#' @param verbose Logical indicating whether progress should be printed to the
+#'   console. Defaults to \code{TRUE}.
+#'
+#' @return A list containing:
+#' \itemize{
+#'   \item \code{summaries}: A data frame with summary statistics for each
+#'         weighting method, including mean and median Spearman correlation,
+#'         Kendall correlation, and L1 distance between weight vectors.
+#'   \item \code{details}: A named list of full resampling-validation results
+#'         for each method, as returned by \code{\link{dl2_cv_resampling}}.
+#' }
+#'
+#' @details
+#' The function implements a repeated-resampling validation strategy that allows
+#' for a transparent and comparable evaluation of alternative machine-learning
+#' weighting procedures for DL2.
+#' For each selected method:
+#' \enumerate{
+#'   \item The DL2 composite indicator is estimated on the full dataset.
+#'   \item \code{B} bootstrap samples are drawn.
+#'   \item The DL2 index is re-estimated on each bootstrap sample.
+#'   \item Rank correlations (Spearman and Kendall) and weight perturbations
+#'         (L1 distance) are computed by comparing the resampled estimates to the
+#'         baseline full-sample solution.
+#' }
+#'
+#' These metrics quantify the stability of each weighting approach and facilitate
+#' method selection grounded in empirical robustness.
+#' A method yielding higher correlations and lower L1 deviations is interpreted as
+#' producing more stable DL2 estimates.
+#'
+#' @examples
+#' \dontrun{
+#' set.seed(123)
+#' Z <- matrix(runif(300), nrow = 30)
+#'
+#' comparison <- dl2_cv_compare_methods(Z, methods = c("rf", "mars"))
+#' comparison$summaries
+#' }
+#'
+#' @export
+dl2_cv_compare_methods <- function(
+    Z,
+    methods    = c("rf", "mars", "nn"),
+    B          = 100,
+    prop       = 0.8,
+    p          = 2,
+    ntree      = 500,
+    max_iter   = 50,
+    lambda     = 0.2,
+    n_stable   = 3,
+    seed       = NULL,
+    verbose    = TRUE
+) {
+  Z <- as.matrix(Z)
+  methods <- match.arg(methods, several.ok = TRUE)
+
+  results_list <- list()
+  summary_table <- data.frame(
+    method           = character(0),
+    mean_spearman    = numeric(0),
+    median_spearman  = numeric(0),
+    mean_kendall     = numeric(0),
+    median_kendall   = numeric(0),
+    mean_L1_w        = numeric(0),
+    median_L1_w      = numeric(0),
+    stringsAsFactors = FALSE
+  )
+
+  for (m in methods) {
+    if (verbose) {
+      cat("\n=== Cross validation for method:", m, "===\n")
+    }
+
+    cv_res <- dl2_cv_resampling(
+      Z            = Z,
+      weight_method = m,
+      B            = B,
+      prop         = prop,
+      p            = p,
+      ntree        = ntree,
+      max_iter     = max_iter,
+      lambda       = lambda,
+      n_stable     = n_stable,
+      seed         = if (is.null(seed)) NULL else seed + which(methods == m),
+      verbose      = verbose
+    )
+
+    results_list[[m]] <- cv_res
+
+    summary_table <- rbind(
+      summary_table,
+      data.frame(
+        method          = m,
+        mean_spearman   = mean(cv_res$rho_spearman, na.rm = TRUE),
+        median_spearman = median(cv_res$rho_spearman, na.rm = TRUE),
+        mean_kendall    = mean(cv_res$rho_kendall, na.rm = TRUE),
+        median_kendall  = median(cv_res$rho_kendall, na.rm = TRUE),
+        mean_L1_w       = mean(cv_res$L1_w, na.rm = TRUE),
+        median_L1_w     = median(cv_res$L1_w, na.rm = TRUE),
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+
+  rownames(summary_table) <- NULL
+
+  list(
+    summaries = summary_table,
+    details   = results_list
+  )
+}
